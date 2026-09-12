@@ -1,0 +1,60 @@
+# Full-stack deployment of the Best Cars Dealership app.
+# Services: MongoDB, Node/Express dealership API, Flask sentiment analyzer,
+# Django web app (gunicorn) and a Cloudflare Tunnel that publishes the
+# Django app under a public hostname (token supplied via .env).
+services:
+  mongo_db:
+    image: mongo:7
+    container_name: dealership_mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+
+  api:
+    build: ../server/database
+    image: dealership-api
+    container_name: dealership_api
+    restart: unless-stopped
+    environment:
+      MONGO_URL: mongodb://mongo_db:27017/
+    depends_on:
+      - mongo_db
+
+  sentiment:
+    build: ../server/djangoapp/microservices
+    image: dealership-sentiment
+    container_name: dealership_sentiment
+    restart: unless-stopped
+
+  web:
+    build: ../server
+    image: dealership-web
+    container_name: dealership_web
+    restart: unless-stopped
+    environment:
+      backend_url: http://api:3030
+      sentiment_analyzer_url: http://sentiment:5000/
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:8000}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
+      SQLITE_PATH: /app/data/db.sqlite3
+    volumes:
+      - web_db:/app/data
+    depends_on:
+      - api
+      - sentiment
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: dealership_tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    depends_on:
+      - web
+
+volumes:
+  mongo_data: {}
+  web_db: {}
